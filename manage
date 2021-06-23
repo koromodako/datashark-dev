@@ -98,7 +98,7 @@ def init_cmd(_):
 
 def build_cmd(_):
     LOGGER.info("building packages...")
-    run_subproc([REPO, 'forall', '-c', 'python3 -m build'])
+    run_subproc([REPO, 'forall', '-g', 'prod', '-c', 'python3 -m build'])
     LOGGER.info("copying packages to release directory...")
     RELEASE_SDIST.mkdir(parents=True, exist_ok=True)
     RELEASE_WHEEL.mkdir(parents=True, exist_ok=True)
