@@ -7,11 +7,31 @@ from shutil import which, rmtree
 from logging import basicConfig, getLogger
 from pathlib import Path
 from argparse import ArgumentParser
-from subprocess import run
+from subprocess import run, CalledProcessError
 from configparser import ConfigParser
 
 
-basicConfig(format='(%(name)s)[%(levelname)7s]: %(message)s', level='DEBUG')
+try:
+    from rich.logging import RichHandler
+
+    RICH_HANDLER = RichHandler(
+        omit_repeated_times=False,
+        rich_tracebacks=True,
+        markup=False,
+    )
+    RICH_HANDLER.setLevel('DEBUG')
+    basicConfig(
+        format='%(message)s',
+        datefmt='[%Y-%m-%dT%H:%M:%S]',
+        level='DEBUG',
+        handlers=[RICH_HANDLER],
+    )
+except ImportError:
+    basicConfig(
+        format='(%(name)s)[%(levelname)7s]: %(message)s',
+        level='DEBUG',
+    )
+
 
 
 HERE = Path(__file__).parent
@@ -30,7 +50,7 @@ def confirm(question):
     return answer and 'yes'.startswith(answer)
 
 
-def repositories():
+def prod_repositories():
     proc = run_subproc(
         [REPO, 'list', '-g', 'prod', '--path-only'],
         text=True,
@@ -89,11 +109,29 @@ def init_cmd(_):
         'install',
         '-U',
         'pip',
-        'setuptools',
+        'rich',
         'wheel',
         'build',
+        'black',
+        'pylint',
+        'setuptools',
         'ruamel.yaml',
     ])
+
+
+def fmt_cmd(_):
+    fmt_prog = str(VENV / 'bin' / 'black')
+    for repo in prod_repositories():
+        run_subproc([fmt_prog, str(repo)])
+
+
+def lint_cmd(_):
+    lint_prog = str(VENV / 'bin' / 'pylint')
+    for repo in prod_repositories():
+        try:
+            run_subproc([lint_prog, str(repo)])
+        except CalledProcessError as exc:
+            LOGGER.warning("linter exited with failure code: %d", exc.returncode)
 
 
 def build_cmd(_):
@@ -102,7 +140,7 @@ def build_cmd(_):
     LOGGER.info("copying packages to release directory...")
     RELEASE_SDIST.mkdir(parents=True, exist_ok=True)
     RELEASE_WHEEL.mkdir(parents=True, exist_ok=True)
-    for repo in repositories():
+    for repo in prod_repositories():
         dist = repo / 'dist'
         try:
             wheel = next(dist.glob('*.whl'))
@@ -118,7 +156,7 @@ def build_cmd(_):
 
 def clean_cmd(_):
     LOGGER.info("cleaning up...")
-    for repo in repositories():
+    for repo in prod_repositories():
         dist = repo / 'dist'
         if dist.is_dir():
             rmtree(str(dist))
@@ -137,7 +175,7 @@ def genconf_cmd(_):
     LOGGER.info("creating configuration file...")
     config = {}
     RELEASE.mkdir(parents=True, exist_ok=True)
-    for repo in repositories():
+    for repo in prod_repositories():
         LOGGER.debug("processing configuration template in %s", repo)
         try:
             repo_config = next(repo.glob('datashark.dist.yml'))
@@ -152,7 +190,7 @@ def genconf_cmd(_):
 def setupdev_cmd(_):
     dependencies = {}
     # build dependency tree
-    for repo in repositories():
+    for repo in prod_repositories():
         config_parser = ConfigParser()
         config_parser.read(str(repo / 'setup.cfg'))
         install_requires = config_parser.get(
@@ -192,6 +230,11 @@ def setupdev_cmd(_):
         ])
 
 
+def start_worker_cmd(args):
+    rq_prog = str(VENV / 'bin' / 'rq')
+    run_subproc([rq_prog, 'worker', f'ds_{args.queue}_jobs'])
+
+
 def check_datashark_repo():
     if not REPO:
         LOGGER.critical("this script requires 'repo' in the path to run!")
@@ -209,6 +252,10 @@ def parse_args():
     cmd.required = True
     init = cmd.add_parser('init')
     init.set_defaults(func=init_cmd)
+    fmt = cmd.add_parser('fmt')
+    fmt.set_defaults(func=fmt_cmd)
+    lint = cmd.add_parser('lint')
+    lint.set_defaults(func=lint_cmd)
     build = cmd.add_parser('build')
     build.set_defaults(func=build_cmd)
     clean = cmd.add_parser('clean')
@@ -217,6 +264,12 @@ def parse_args():
     genconf.set_defaults(func=genconf_cmd)
     setupdev = cmd.add_parser('setupdev')
     setupdev.set_defaults(func=setupdev_cmd)
+    start_worker = cmd.add_parser('start-worker')
+    start_worker.add_argument(
+        'queue',
+        choices=['dispatch', 'plugin', 'cleanup'],
+    )
+    start_worker.set_defaults(func=start_worker_cmd)
     return parser.parse_args()
 
 
