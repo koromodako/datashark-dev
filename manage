@@ -125,11 +125,6 @@ def clean_cmd(_):
         build = repo / 'build'
         if build.is_dir():
             rmtree(str(build))
-        try:
-            egg_info = next(repo.glob('*.egg-info'))
-            rmtree(str(egg_info))
-        except StopIteration:
-            pass
 
 
 def genconf_cmd(_):
