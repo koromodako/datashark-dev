@@ -8,6 +8,7 @@ from logging import basicConfig, getLogger
 from pathlib import Path
 from argparse import ArgumentParser
 from subprocess import run
+from configparser import ConfigParser
 
 
 basicConfig(format='(%(name)s)[%(levelname)7s]: %(message)s', level='DEBUG')
@@ -114,6 +115,23 @@ def build_cmd(_):
         except StopIteration:
             LOGGER.warning("could not find sdist for %s", repo)
 
+
+def clean_cmd(_):
+    LOGGER.info("cleaning up...")
+    for repo in repositories():
+        dist = repo / 'dist'
+        if dist.is_dir():
+            rmtree(str(dist))
+        build = repo / 'build'
+        if build.is_dir():
+            rmtree(str(build))
+        try:
+            egg_info = next(repo.glob('*.egg-info'))
+            rmtree(str(egg_info))
+        except StopIteration:
+            pass
+
+
 def genconf_cmd(_):
     try:
         from ruamel.yaml import load, dump, RoundTripLoader, RoundTripDumper
@@ -136,20 +154,48 @@ def genconf_cmd(_):
         dump(config, fstream, Dumper=RoundTripDumper, default_flow_style=False)
 
 
-def clean_cmd(_):
-    LOGGER.info("cleaning up...")
+def setupdev_cmd(_):
+    dependencies = {}
+    # build dependency tree
     for repo in repositories():
-        dist = repo / 'dist'
-        if dist.is_dir():
-            rmtree(str(dist))
-        build = repo / 'build'
-        if build.is_dir():
-            rmtree(str(build))
-        try:
-            egg_info = next(repo.glob('*.egg-info'))
-            rmtree(str(egg_info))
-        except StopIteration:
-            pass
+        config_parser = ConfigParser()
+        config_parser.read(str(repo / 'setup.cfg'))
+        install_requires = config_parser.get(
+            'options', 'install_requires', fallback=''
+        )
+        dependencies[repo] = {
+            dep
+            for dep in install_requires.split('\n')
+            if dep.startswith('datashark-')
+        }
+    # resolve dependencies
+    ordered_repositories = []
+    while dependencies:
+        ordered = []
+        for repo, reqs in dependencies.items():
+            if not reqs:
+                ordered.append(repo)
+        if not ordered:
+            LOGGER.critical("dependency loop detected!")
+            return
+        for repo in ordered:
+            del dependencies[repo]
+        for value in dependencies.values():
+            for name in [repo.name for repo in ordered]:
+                value.discard(name)
+        ordered_repositories += ordered
+    # install packages
+    for repo in ordered_repositories:
+        LOGGER.info("installing %s", repo)
+        run_subproc([
+            str(PIP),
+            'install',
+            '--find-links',
+            str(HERE),
+            '-e',
+            str(repo)
+        ])
+
 
 def check_datashark_repo():
     if not REPO:
@@ -170,10 +216,12 @@ def parse_args():
     init.set_defaults(func=init_cmd)
     build = cmd.add_parser('build')
     build.set_defaults(func=build_cmd)
-    genconf = cmd.add_parser('genconf')
-    genconf.set_defaults(func=genconf_cmd)
     clean = cmd.add_parser('clean')
     clean.set_defaults(func=clean_cmd)
+    genconf = cmd.add_parser('genconf')
+    genconf.set_defaults(func=genconf_cmd)
+    setupdev = cmd.add_parser('setupdev')
+    setupdev.set_defaults(func=setupdev_cmd)
     return parser.parse_args()
 
 
