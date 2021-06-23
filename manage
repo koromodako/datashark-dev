@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+'''
+Datashark repo management script
+'''
+import sys
+from shutil import which, rmtree
+from logging import basicConfig, getLogger
+from pathlib import Path
+from argparse import ArgumentParser
+from subprocess import run
+
+
+basicConfig(format='(%(name)s)[%(levelname)7s]: %(message)s', level='DEBUG')
+
+
+HERE = Path(__file__).parent
+VENV = HERE / 'venv'
+PIP = VENV / 'bin' / 'pip'
+REPO = which('repo')
+RELEASE = HERE / 'release'
+RELEASE_SDIST = RELEASE / 'sdist'
+RELEASE_WHEEL = RELEASE / 'wheel'
+LOGGER = getLogger('manage')
+LOGGER.setLevel('INFO')
+
+
+def confirm(question):
+    answer = input(f"{question} [y/N]: ").lower()
+    return answer and 'yes'.startswith(answer)
+
+
+def repositories():
+    proc = run_subproc(
+        [REPO, 'list', '-g', 'prod', '--path-only'],
+        text=True,
+        capture_output=True,
+    )
+    for line in proc.stdout.split('\n'):
+        line = line.strip()
+        if line:
+            yield HERE / line
+
+
+def run_subproc(args, **kwargs):
+    LOGGER.debug("subprocess started: %s", args)
+    if 'check' in kwargs:
+        del kwargs['check']
+    return run(args, check=True, **kwargs)
+
+
+def merge_conf(dst, src):
+    for key, value in src.items():
+        # add non existant value to dict
+        if key not in dst:
+            dst[key] = value
+            continue
+        # merge dicts
+        if isinstance(value, dict):
+            if isinstance(dst[key], dict):
+                merge_conf(dst[key], value)
+                continue
+            LOGGER.warning(
+                "cannot merge '%s', inconsistent types (%s != %s)",
+                key,
+                type(value),
+                type(dst[key]),
+            )
+        # merge lists
+        if isinstance(value, list):
+            if isinstance(dst[key], list):
+                dst[key] += value
+                continue
+            LOGGER.warning(
+                "cannot merge '%s', inconsistent types (%s != %s)",
+                key,
+                type(value),
+                type(dst[key]),
+            )
+        LOGGER.warning("merge cannot override existing key '%s'", key)
+
+
+def init_cmd(_):
+    if VENV.is_dir() and not confirm("Do you want to perform the operation?"):
+        return
+    run_subproc(['python3', '-m', 'venv', str(VENV)])
+    run_subproc([
+        str(PIP),
+        'install',
+        '-U',
+        'pip',
+        'setuptools',
+        'wheel',
+        'build',
+        'ruamel.yaml',
+    ])
+
+
+def build_cmd(_):
+    LOGGER.info("building packages...")
+    run_subproc([REPO, 'forall', '-c', 'python3 -m build'])
+    LOGGER.info("copying packages to release directory...")
+    RELEASE_SDIST.mkdir(parents=True, exist_ok=True)
+    RELEASE_WHEEL.mkdir(parents=True, exist_ok=True)
+    for repo in repositories():
+        dist = repo / 'dist'
+        try:
+            wheel = next(dist.glob('*.whl'))
+            wheel.rename(RELEASE_WHEEL / wheel.name)
+        except StopIteration:
+            LOGGER.warning("could not find wheel for %s", repo)
+        try:
+            sdist = next(dist.glob('*.tar.gz'))
+            sdist.rename(RELEASE_SDIST / sdist.name)
+        except StopIteration:
+            LOGGER.warning("could not find sdist for %s", repo)
+
+def genconf_cmd(_):
+    try:
+        from ruamel.yaml import load, dump, RoundTripLoader, RoundTripDumper
+    except ImportError:
+        LOGGER.critical("failed to import YAML from ruamel.yaml!")
+        LOGGER.critical("please activate the venv created with 'init' command.")
+        return
+    LOGGER.info("creating configuration file...")
+    config = {}
+    RELEASE.mkdir(parents=True, exist_ok=True)
+    for repo in repositories():
+        LOGGER.debug("processing configuration template in %s", repo)
+        try:
+            repo_config = next(repo.glob('datashark.dist.yml'))
+            with repo_config.open() as fstream:
+                merge_conf(config, load(fstream, Loader=RoundTripLoader))
+        except StopIteration:
+            continue
+    with (RELEASE / 'datashark.dist.yml').open('w') as fstream:
+        dump(config, fstream, Dumper=RoundTripDumper, default_flow_style=False)
+
+
+def clean_cmd(_):
+    LOGGER.info("cleaning up...")
+    for repo in repositories():
+        dist = repo / 'dist'
+        if dist.is_dir():
+            rmtree(str(dist))
+        build = repo / 'build'
+        if build.is_dir():
+            rmtree(str(build))
+        try:
+            egg_info = next(repo.glob('*.egg-info'))
+            rmtree(str(egg_info))
+        except StopIteration:
+            pass
+
+def check_datashark_repo():
+    if not REPO:
+        LOGGER.critical("this script requires 'repo' in the path to run!")
+        sys.exit(1)
+    manifest = HERE / '.repo' / 'manifests' / 'default.xml'
+    if not 'datashark' in manifest.read_text():
+        LOGGER.critical("this does not seem to be datashark repo!")
+        sys.exit(1)
+
+
+def parse_args():
+    parser = ArgumentParser(description="Datashark repo management script")
+    parser.add_argument('--debug', '-d', action='store_true')
+    cmd = parser.add_subparsers(dest='cmd')
+    cmd.required = True
+    init = cmd.add_parser('init')
+    init.set_defaults(func=init_cmd)
+    build = cmd.add_parser('build')
+    build.set_defaults(func=build_cmd)
+    genconf = cmd.add_parser('genconf')
+    genconf.set_defaults(func=genconf_cmd)
+    clean = cmd.add_parser('clean')
+    clean.set_defaults(func=clean_cmd)
+    return parser.parse_args()
+
+
+def app():
+    LOGGER.info("running from %s", HERE)
+    check_datashark_repo()
+    args = parse_args()
+    if args.debug:
+        LOGGER.setLevel('DEBUG')
+    args.func(args)
+    LOGGER.info("done.")
+
+
+if __name__ == '__main__':
+    app()
