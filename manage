@@ -46,11 +46,13 @@ LOGGER.setLevel('INFO')
 
 
 def confirm(question):
+    """YES/NO question confirmation"""
     answer = input(f"{question} [y/N]: ").lower()
     return answer and 'yes'.startswith(answer)
 
 
-def prod_repositories():
+def enumerate_prod_repositories():
+    """List production repositories"""
     proc = run_subproc(
         [REPO, 'list', '-g', 'prod', '--path-only'],
         text=True,
@@ -63,6 +65,7 @@ def prod_repositories():
 
 
 def run_subproc(args, **kwargs):
+    """Start a subprocess and wait for it to finish"""
     LOGGER.debug("subprocess started: %s", args)
     if 'check' in kwargs:
         del kwargs['check']
@@ -73,6 +76,7 @@ def run_subproc(args, **kwargs):
 
 
 def merge_conf(dst, src):
+    """Merge configuration files"""
     for key, value in src.items():
         # add non existant value to dict
         if key not in dst:
@@ -104,6 +108,7 @@ def merge_conf(dst, src):
 
 
 def init_cmd(_):
+    """Initialize virtual environment"""
     if VENV.is_dir() and not confirm("Do you want to perform the operation?"):
         return
     run_subproc(['python3', '-m', 'venv', str(VENV)])
@@ -123,14 +128,16 @@ def init_cmd(_):
 
 
 def fmt_cmd(_):
+    """Run black on production repositories"""
     fmt_prog = str(VENV / 'bin' / 'black')
-    for repo in prod_repositories():
+    for repo in enumerate_prod_repositories():
         run_subproc([fmt_prog, str(repo)])
 
 
 def lint_cmd(_):
+    """Run pylint on production repositories"""
     lint_prog = str(VENV / 'bin' / 'pylint')
-    for repo in prod_repositories():
+    for repo in enumerate_prod_repositories():
         try:
             run_subproc([lint_prog, str(repo)])
         except CalledProcessError as exc:
@@ -138,12 +145,13 @@ def lint_cmd(_):
 
 
 def build_cmd(_):
+    """Build python packages of production repositories"""
     LOGGER.info("building packages...")
     run_subproc([REPO, 'forall', '-g', 'prod', '-c', 'python3 -m build'])
     LOGGER.info("copying packages to release directory...")
     RELEASE_SDIST.mkdir(parents=True, exist_ok=True)
     RELEASE_WHEEL.mkdir(parents=True, exist_ok=True)
-    for repo in prod_repositories():
+    for repo in enumerate_prod_repositories():
         dist = repo / 'dist'
         try:
             wheel = next(dist.glob('*.whl'))
@@ -158,8 +166,9 @@ def build_cmd(_):
 
 
 def clean_cmd(_):
+    """Remove files produced during build process"""
     LOGGER.info("cleaning up...")
-    for repo in prod_repositories():
+    for repo in enumerate_prod_repositories():
         dist = repo / 'dist'
         if dist.is_dir():
             rmtree(str(dist))
@@ -169,6 +178,7 @@ def clean_cmd(_):
 
 
 def genconf_cmd(_):
+    """Generate configuration file from template configuration files"""
     try:
         from ruamel.yaml import load, dump, RoundTripLoader, RoundTripDumper
     except ImportError:
@@ -178,7 +188,7 @@ def genconf_cmd(_):
     LOGGER.info("creating configuration file...")
     config = {}
     RELEASE.mkdir(parents=True, exist_ok=True)
-    for repo in prod_repositories():
+    for repo in enumerate_prod_repositories():
         LOGGER.debug("processing configuration template in %s", repo)
         try:
             repo_config = next(repo.glob('datashark.dist.yml'))
@@ -191,9 +201,10 @@ def genconf_cmd(_):
 
 
 def setupdev_cmd(_):
+    """Install packages in development mode in virtual environment"""
     dependencies = {}
     # build dependency tree
-    for repo in prod_repositories():
+    for repo in enumerate_prod_repositories():
         config_parser = ConfigParser()
         config_parser.read(str(repo / 'setup.cfg'))
         install_requires = config_parser.get(
@@ -233,12 +244,8 @@ def setupdev_cmd(_):
         ])
 
 
-def start_worker_cmd(args):
-    rq_prog = str(VENV / 'bin' / 'rq')
-    run_subproc([rq_prog, 'worker', f'ds_{args.queue}_jobs'])
-
-
 def check_datashark_repo():
+    """Check current directory is a datachark repo"""
     if not REPO:
         LOGGER.critical("this script requires 'repo' in the path to run!")
         sys.exit(1)
@@ -248,35 +255,31 @@ def check_datashark_repo():
         sys.exit(1)
 
 
+def setup_command(cmd, name, handler):
+    """Setup a command"""
+    parser = cmd.add_parser(name, help=handler.__doc__)
+    parser.set_defaults(func=handler)
+    return parser
+
+
 def parse_args():
+    """Parse command line arguments"""
     parser = ArgumentParser(description="Datashark repo management script")
     parser.add_argument('--debug', '-d', action='store_true')
-    cmd = parser.add_subparsers(dest='cmd')
+    cmd = parser.add_subparsers(dest='cmd', help="Command to run")
     cmd.required = True
-    init = cmd.add_parser('init')
-    init.set_defaults(func=init_cmd)
-    fmt = cmd.add_parser('fmt')
-    fmt.set_defaults(func=fmt_cmd)
-    lint = cmd.add_parser('lint')
-    lint.set_defaults(func=lint_cmd)
-    build = cmd.add_parser('build')
-    build.set_defaults(func=build_cmd)
-    clean = cmd.add_parser('clean')
-    clean.set_defaults(func=clean_cmd)
-    genconf = cmd.add_parser('genconf')
-    genconf.set_defaults(func=genconf_cmd)
-    setupdev = cmd.add_parser('setupdev')
-    setupdev.set_defaults(func=setupdev_cmd)
-    start_worker = cmd.add_parser('start-worker')
-    start_worker.add_argument(
-        'queue',
-        choices=['dispatch', 'plugin', 'cleanup'],
-    )
-    start_worker.set_defaults(func=start_worker_cmd)
+    setup_command(cmd, 'init', init_cmd)
+    setup_command(cmd, 'fmt', fmt_cmd)
+    setup_command(cmd, 'lint', lint_cmd)
+    setup_command(cmd, 'build', build_cmd)
+    setup_command(cmd, 'clean', clean_cmd)
+    setup_command(cmd, 'genconf', genconf_cmd)
+    setup_command(cmd, 'setupdev', setupdev_cmd)
     return parser.parse_args()
 
 
 def app():
+    """Application entry point"""
     LOGGER.info("running from %s", HERE)
     check_datashark_repo()
     args = parse_args()
