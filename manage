@@ -33,8 +33,7 @@ except ImportError:
     )
 
 
-
-HERE = Path(__file__).parent
+HERE = Path(__file__).parent.resolve()
 VENV = HERE / 'venv'
 PIP = VENV / 'bin' / 'pip'
 REPO = which('repo')
@@ -43,6 +42,23 @@ RELEASE_SDIST = RELEASE / 'sdist'
 RELEASE_WHEEL = RELEASE / 'wheel'
 LOGGER = getLogger('manage')
 LOGGER.setLevel('INFO')
+
+
+REQUIREMENTS = [
+    'pip',
+    'rich',
+    'wheel',
+    'build',
+    'black',
+    'pylint',
+    'setuptools',
+    'ruamel.yaml',
+]
+
+
+def mkdir(*directories):
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
 
 
 def confirm(question):
@@ -112,19 +128,7 @@ def init_cmd(_):
     if VENV.is_dir() and not confirm("Do you want to perform the operation?"):
         return
     run_subproc(['python3', '-m', 'venv', str(VENV)])
-    run_subproc([
-        str(PIP),
-        'install',
-        '-U',
-        'pip',
-        'rich',
-        'wheel',
-        'build',
-        'black',
-        'pylint',
-        'setuptools',
-        'ruamel.yaml',
-    ])
+    run_subproc([str(PIP), 'install', '-U'] + REQUIREMENTS)
 
 
 def fmt_cmd(_):
@@ -141,7 +145,9 @@ def lint_cmd(_):
         try:
             run_subproc([lint_prog, str(repo)])
         except CalledProcessError as exc:
-            LOGGER.warning("linter exited with failure code: %d", exc.returncode)
+            LOGGER.warning(
+                "linter exited with failure code: %d", exc.returncode
+            )
 
 
 def build_cmd(_):
@@ -149,8 +155,7 @@ def build_cmd(_):
     LOGGER.info("building packages...")
     run_subproc([REPO, 'forall', '-g', 'prod', '-c', 'python3 -m build'])
     LOGGER.info("copying packages to release directory...")
-    RELEASE_SDIST.mkdir(parents=True, exist_ok=True)
-    RELEASE_WHEEL.mkdir(parents=True, exist_ok=True)
+    mkdir(RELEASE_SDIST, RELEASE_WHEEL)
     for repo in enumerate_prod_repositories():
         dist = repo / 'dist'
         try:
@@ -183,11 +188,13 @@ def genconf_cmd(_):
         from ruamel.yaml import load, dump, RoundTripLoader, RoundTripDumper
     except ImportError:
         LOGGER.critical("failed to import YAML from ruamel.yaml!")
-        LOGGER.critical("please activate the venv created with 'init' command.")
+        LOGGER.critical(
+            "please activate the venv created with 'init' command."
+        )
         return
     LOGGER.info("creating configuration file...")
     config = {}
-    RELEASE.mkdir(parents=True, exist_ok=True)
+    mkdir(RELEASE)
     for repo in enumerate_prod_repositories():
         LOGGER.debug("processing configuration template in %s", repo)
         try:
@@ -196,8 +203,10 @@ def genconf_cmd(_):
                 merge_conf(config, load(fstream, Loader=RoundTripLoader))
         except StopIteration:
             continue
-    with (RELEASE / 'datashark.dist.yml').open('w') as fstream:
+    output = RELEASE / 'datashark.dist.yml'
+    with output.open('w') as fstream:
         dump(config, fstream, Dumper=RoundTripDumper, default_flow_style=False)
+    LOGGER.info("full template configuration dumped to %s", output)
 
 
 def setupdev_cmd(_):
@@ -234,14 +243,9 @@ def setupdev_cmd(_):
     # install packages
     for repo in ordered_repositories:
         LOGGER.info("installing %s", repo)
-        run_subproc([
-            str(PIP),
-            'install',
-            '--find-links',
-            str(HERE),
-            '-e',
-            str(repo)
-        ])
+        run_subproc(
+            [str(PIP), 'install', '--find-links', str(HERE), '-e', str(repo)]
+        )
 
 
 def check_datashark_repo():

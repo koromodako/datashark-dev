@@ -129,3 +129,4 @@ dmypy.json
 .pyre/
 
 __version__.py
+ssl/
