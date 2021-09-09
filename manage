@@ -2,6 +2,7 @@
 '''
 Datashark repo management script
 '''
+import re
 import sys
 from shutil import which, rmtree
 from logging import basicConfig, getLogger
@@ -57,6 +58,7 @@ REQUIREMENTS = [
 
 
 def mkdir(*directories):
+    """Make directories"""
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
 
@@ -67,7 +69,7 @@ def confirm(question):
     return answer and 'yes'.startswith(answer)
 
 
-def enumerate_prod_repositories():
+def enumerate_prod_repositories(pattern=None):
     """List production repositories"""
     proc = run_subproc(
         [REPO, 'list', '-g', 'prod', '--path-only'],
@@ -76,6 +78,8 @@ def enumerate_prod_repositories():
     )
     for line in proc.stdout.split('\n'):
         line = line.strip()
+        if pattern and not pattern.search(line):
+            continue
         if line:
             yield HERE / line
 
@@ -248,6 +252,14 @@ def setupdev_cmd(_):
         )
 
 
+def setupdevmatch_cmd(args):
+    """Setup packages that match a pattern"""
+    for repo in enumerate_prod_repositories(args.pattern):
+        LOGGER.info("installing %s", repo)
+        run_subproc(
+            [str(PIP), 'install', '--find-links', str(HERE), '-e', str(repo)]
+        )
+
 def check_datashark_repo():
     """Check current directory is a datachark repo"""
     if not REPO:
@@ -279,6 +291,12 @@ def parse_args():
     setup_command(cmd, 'clean', clean_cmd)
     setup_command(cmd, 'genconf', genconf_cmd)
     setup_command(cmd, 'setupdev', setupdev_cmd)
+    setupdevmatch = setup_command(cmd, 'setupdevmatch', setupdevmatch_cmd)
+    setupdevmatch.add_argument(
+        'pattern',
+        type=re.compile,
+        help="Pattern to match",
+    )
     return parser.parse_args()
 
 
