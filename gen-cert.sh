@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
+. common.sh
+
 CWD="$(pwd)"
 CA_DIR="${CWD}/ssl/ca"
 INT_DIR="${CA_DIR}/intermediate"
@@ -40,14 +42,13 @@ case "${MODE}" in
 esac
 # move to CA directory
 cd "${CA_DIR}"
-# generate private key
-openssl genrsa \
-      -aes256 \
-      -out "intermediate/private/${PREFIX}.key.pem" \
-      4096
+print "generate private key"
+openssl genpkey \
+      -algorithm ed25519 \
+      -out "intermediate/private/${PREFIX}.key.pem"
 # change private key permissions
 chmod 400 "intermediate/private/${PREFIX}.key.pem"
-# generate certificate signing request
+print "generate certificate signing request"
 openssl req \
     -config intermediate/openssl.cnf \
     -key "intermediate/private/${PREFIX}.key.pem" \
@@ -55,8 +56,9 @@ openssl req \
     -sha256 \
     -subj "${SUBJECT}" \
     -out "intermediate/csr/${PREFIX}.csr.pem"
-# create certificate and sign it with intermediate CA
+print "create certificate and sign it with intermediate CA"
 openssl ca \
+    -batch \
     -config intermediate/openssl.cnf \
     -extensions "${EXTENSIONS}" \
     -days 730 \
@@ -66,12 +68,13 @@ openssl ca \
     -out "intermediate/certs/${PREFIX}.cert.pem"
 # change certificate permissions
 chmod 444 "intermediate/certs/${PREFIX}.cert.pem"
-# display certificate
+cat "intermediate/certs/${PREFIX}.cert.pem"
+print "display certificate"
 openssl x509 \
     -noout \
     -text \
     -in "intermediate/certs/${PREFIX}.cert.pem"
-# verify certificate
+print "verify certificate"
 openssl verify \
     -CAfile intermediate/certs/ca-chain.cert.pem \
     "intermediate/certs/${PREFIX}.cert.pem"

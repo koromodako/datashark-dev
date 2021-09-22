@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
+. common.sh
+
 CWD="$(pwd)"
 CA_DIR="${CWD}/ssl/ca"
 INT_DIR="${CA_DIR}/intermediate"
@@ -65,7 +67,6 @@ emailAddress            = optional
 # ---------------------------------------------------------------------
 [ req ]
 # req options ---------------------------------------------------------
-default_bits        = 4096
 distinguished_name  = req_distinguished_name
 string_mask         = utf8only
 default_md          = sha256
@@ -134,14 +135,13 @@ authorityKeyIdentifier = keyid,issuer
 keyUsage = critical, digitalSignature
 extendedKeyUsage = critical, OCSPSigning
 EOF
-# generate CA private key
-openssl genrsa \
-    -aes256 \
-    -out private/ca.key.pem \
-    4096
+print "generate CA private key"
+openssl genpkey \
+    -algorithm ed25519 \
+    -out private/ca.key.pem
 # change private key permissions
 chmod 400 private/ca.key.pem
-# create self-signed CA certificate
+print "self-sign CA certificate"
 openssl req \
     -config openssl.cnf \
     -key private/ca.key.pem \
@@ -154,7 +154,8 @@ openssl req \
     -out certs/ca.cert.pem
 # change self-signed CA certificate permissions
 chmod 444 certs/ca.cert.pem
-# display self-signed CA certificate
+cat certs/ca.cert.pem
+print "display self-signed CA certificate"
 openssl x509 \
     -noout  \
     -text \
@@ -179,14 +180,13 @@ sed -i "s#^policy            = .*\$#policy            = policy_loose#g" "${INT_D
 sed -i "s#^organizationalUnitName_default  = .*\$#organizationalUnitName_default  = Datashark Intermediate Certificate Authority#g" "${INT_DIR}/openssl.cnf"
 # move to CA directory
 cd "${CA_DIR}"
-# generate intermediate CA private key
-openssl genrsa \
-    -aes256 \
-    -out intermediate/private/intermediate.key.pem \
-    4096
+print "generate intermediate CA private key"
+openssl genpkey \
+    -algorithm ed25519 \
+    -out intermediate/private/intermediate.key.pem
 # change intermediate CA private key permissions
 chmod 400 intermediate/private/intermediate.key.pem
-# create intermediate CA certificate signing request
+print "create intermediate CA certificate signing request"
 openssl req \
     -config intermediate/openssl.cnf \
     -new \
@@ -194,8 +194,9 @@ openssl req \
     -key intermediate/private/intermediate.key.pem \
     -subj "/C=FR/ST=France/L=Paris/O=Datashark/OU=Datashark Intermediate Certificate Authority/CN=Datashark Intermediate CA" \
     -out intermediate/csr/intermediate.csr.pem
-# create intermediate CA certificate
+print "create intermediate CA certificate"
 openssl ca \
+    -batch \
     -config openssl.cnf \
     -extensions v3_intermediate_ca \
     -days 3650 \
@@ -205,17 +206,18 @@ openssl ca \
     -out intermediate/certs/intermediate.cert.pem
 # change intermediate CA certficate permissions
 chmod 444 intermediate/certs/intermediate.cert.pem
-# display intermediate CA certificate
+cat intermediate/certs/intermediate.cert.pem
+print "display intermediate CA certificate"
 openssl x509 \
     -noout \
     -text \
     -in intermediate/certs/intermediate.cert.pem
-# verify intermediate CA certificate
+print "verify intermediate CA certificate"
 openssl verify \
     -CAfile certs/ca.cert.pem \
     intermediate/certs/intermediate.cert.pem
-# create CA certficates chain
+print "create CA certficates chain"
 cat intermediate/certs/intermediate.cert.pem \
-    certs/ca.cert.pem > intermediate/certs/ca-chain.cert.pem
+    certs/ca.cert.pem | tee intermediate/certs/ca-chain.cert.pem
 # change CA certificates chain permissions
 chmod 444 intermediate/certs/ca-chain.cert.pem
