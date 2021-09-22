@@ -113,11 +113,15 @@ authorityKeyIdentifier = keyid,issuer
 keyUsage = critical, nonRepudiation, digitalSignature, keyEncipherment
 extendedKeyUsage = clientAuth, emailProtection
 # ---------------------------------------------------------------------
+[ alt_names ]
+DNS.1 = localhost
+# ---------------------------------------------------------------------
 [ agent_cert ]
 # extensions for server certificates ----------------------------------
 basicConstraints = CA:FALSE
 nsCertType = server
 nsComment = "OpenSSL Generated Server Certificate"
+subjectAltName = @alt_names
 subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid,issuer:always
 keyUsage = critical, digitalSignature, keyEncipherment
