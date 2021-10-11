@@ -7,6 +7,7 @@ import sys
 from shutil import which, rmtree
 from logging import basicConfig, getLogger
 from pathlib import Path
+from hashlib import sha256
 from argparse import ArgumentParser
 from subprocess import run, CalledProcessError
 from configparser import ConfigParser
@@ -57,6 +58,18 @@ REQUIREMENTS = [
 ]
 
 
+def sha256sum(filepath):
+    """Compute SHA256 digest for filepath content"""
+    mdigest = sha256()
+    with filepath.open('rb') as fstream:
+        while True:
+            chunk = fstream.read(100*4096)
+            if not chunk:
+                break
+            mdigest.update(chunk)
+    return mdigest.hexdigest()
+
+
 def clean(*directories):
     """Remove all files in given directories"""
     for directory in directories:
@@ -64,6 +77,7 @@ def clean(*directories):
             if not file.is_file():
                 continue
             file.unlink()
+
 
 def mkdir(*directories):
     """Make directories"""
@@ -190,12 +204,18 @@ def build_cmd(_):
         dist = repo / 'dist'
         try:
             wheel = next(dist.glob('*.whl'))
-            wheel.rename(RELEASE_WHEEL / wheel.name)
+            release_wheel = RELEASE_WHEEL / wheel.name
+            release_wheel_digest = RELEASE_WHEEL / f'{wheel.name}.sha256'
+            wheel.rename(release_wheel)
+            release_wheel_digest.write_text(sha256sum(release_wheel))
         except StopIteration:
             LOGGER.warning("could not find wheel for %s", repo)
         try:
             sdist = next(dist.glob('*.tar.gz'))
-            sdist.rename(RELEASE_SDIST / sdist.name)
+            release_sdist = RELEASE_SDIST / sdist.name
+            release_sdist_digest = RELEASE_SDIST / f'{sdist.name}.sha256'
+            sdist.rename(release_sdist)
+            release_sdist_digest.write_text(sha256sum(release_sdist))
         except StopIteration:
             LOGGER.warning("could not find sdist for %s", repo)
 
