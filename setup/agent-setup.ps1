@@ -8,7 +8,7 @@ $repo_url = "https://github.com/koromodako"
 $core_vers = "0.1.1"
 $agent_vers = "0.1.0"
 $win_procs_vers = "0.1.0"
-$indep_procs_vers = "0.1.0"
+$indep_procs_vers = "0.2.0"
 $dev_vers = "0.1.0"
 # computed variables --------------------------------------------------------------------------------------------------
 $tmpdir = "$env:localappdata\Temp"
